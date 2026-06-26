@@ -197,7 +197,9 @@ export default function MediaBrowser() {
   const [currentSub, setCurrentSub] = useState('');
   const [subsEnabled, setSubsEnabled] = useState(true);
   const [srtFiles, setSrtFiles] = useState<FileEntry[]>([]);
+  const [videoFiles, setVideoFiles] = useState<FileEntry[]>([]);
   const [subSize, setSubSize] = useState<'small'|'medium'|'large'>('small');
+  const [autoNext, setAutoNext] = useState(true);
   const SUB_SIZES = { small: '1.8vw', medium: '2.7vw', large: '4.05vw' };
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<HTMLTrackElement>(null);
@@ -250,6 +252,27 @@ export default function MediaBrowser() {
   const navigateToBreadcrumb = (index: number) =>
     setNavStack(prev => prev.slice(0, index + 1));
 
+  const playEntry = async (entry: FileEntry, allEntries: FileEntry[]) => {
+    const baseName = entry.name.replace(/\.mp4$/i, '');
+    const allSrts = allEntries.filter(e => e.ext === '.srt');
+    const matchedSrt = allSrts.find(e => e.name.replace(/\.srt$/i, '') === baseName);
+    const allVideos = allEntries.filter(e => e.ext === '.mp4');
+    setSrtFiles(allSrts);
+    setVideoFiles(allVideos);
+    if (vttUrlRef.current) { URL.revokeObjectURL(vttUrlRef.current); vttUrlRef.current = ''; }
+    setSubtitles([]);
+    setCurrentSub('');
+    setSubsEnabled(true);
+    setModal({ type: 'video', path: entry.path, name: entry.name });
+    if (matchedSrt) {
+      setTimeout(async () => {
+        const res = await fetch('/api/files?path=' + encodeURIComponent(matchedSrt.path) + '&action=read');
+        const data = await res.json();
+        if (data.content) applyCues(parseSRT(data.content));
+      }, 100);
+    }
+  };
+
   const handleFileClick = async (entry: FileEntry) => {
     if (entry.ext === '.url') {
       const res = await fetch('/api/files?path=' + encodeURIComponent(entry.path) + '&action=read');
@@ -266,24 +289,7 @@ export default function MediaBrowser() {
       return;
     }
     if (entry.ext === '.mp4') {
-      const baseName = entry.name.replace(/\.mp4$/i, '');
-      const allSrts = entries.filter(e => e.ext === '.srt');
-      const matchedSrt = allSrts.find(e => e.name.replace(/\.srt$/i, '') === baseName);
-      setSrtFiles(allSrts);
-      // Reset cues/VTT
-      if (vttUrlRef.current) { URL.revokeObjectURL(vttUrlRef.current); vttUrlRef.current = ''; }
-      setSubtitles([]);
-      setCurrentSub('');
-      setSubsEnabled(true);
-      setModal({ type: 'video', path: entry.path, name: entry.name });
-      if (matchedSrt) {
-        // Load after modal opens so trackRef is attached
-        setTimeout(async () => {
-          const res = await fetch('/api/files?path=' + encodeURIComponent(matchedSrt.path) + '&action=read');
-          const data = await res.json();
-          if (data.content) applyCues(parseSRT(data.content));
-        }, 100);
-      }
+      await playEntry(entry, entries);
     }
   };
 
@@ -314,6 +320,14 @@ export default function MediaBrowser() {
     const t = videoRef.current.currentTime;
     const sub = subtitles.find(s => t >= s.start && t <= s.end);
     setCurrentSub(sub ? sub.text : '');
+  };
+
+  const handleVideoEnded = () => {
+    if (!autoNext || videoFiles.length < 2) return;
+    const currentIdx = videoFiles.findIndex(v => v.path === modal.path);
+    if (currentIdx === -1 || currentIdx === videoFiles.length - 1) return;
+    const nextVideo = videoFiles[currentIdx + 1];
+    playEntry(nextVideo, [...videoFiles, ...srtFiles]);
   };
 
   const closeModal = () => {
@@ -412,7 +426,7 @@ export default function MediaBrowser() {
       `}</style>
 
       <div className="app">
-        <div className="logo">◈ Dze Media Browser</div>
+        <div className="logo">◈ Media Browser</div>
         <div className="tagline">local · video · docs · links</div>
 
         <div className="open-bar">
@@ -532,11 +546,16 @@ export default function MediaBrowser() {
                     CC {subsEnabled ? 'ON' : 'OFF'}
                   </button>
                 )}
+                <button className={'sub-toggle' + (autoNext ? ' on' : '')}
+                  title="Auto-play next video"
+                  onClick={() => setAutoNext(v => !v)}>
+                  ▶▶ {autoNext ? 'ON' : 'OFF'}
+                </button>
                 <button className="close-btn" onClick={closeModal}>×</button>
               </div>
             </div>
             <div className="video-wrap">
-              <video ref={videoRef} controls autoPlay onTimeUpdate={handleTimeUpdate}
+              <video ref={videoRef} controls autoPlay onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded}
                 style={{ fontSize: SUB_SIZES[subSize] }}
                 src={'/api/stream?path=' + encodeURIComponent(modal.path)}>
                 {vttUrlRef.current && (
