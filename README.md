@@ -15,4 +15,6 @@ Open [http://localhost:3000](http://localhost:3000) with your browser .
 
 Select a folder to start.
 
+![](dze_media_browser_screenshot_2.png)
+
 
