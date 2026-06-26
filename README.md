@@ -1,6 +1,6 @@
 ![](dze_media_browser_screenshot.png)
 
-A simple media browser to browse and play local media; currently support mp4 and srt subtitles. Have fun watching your videos.
+A simple local media browser and player; currently support mp4 and srt subtitles. Have fun watching your videos.
 
 ## Getting Started
 
