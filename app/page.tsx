@@ -409,7 +409,17 @@ export default function MediaBrowser() {
 
         /* ── Video / txt modal ── */
         .overlay { position: fixed; inset: 0; background: rgba(2,8,24,0.92); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
-        .modal   { background: rgba(6,15,40,0.97); border: 1px solid rgba(59,130,246,0.2); border-radius: 12px; width: 100%; max-width: 900px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(59,130,246,0.15); }
+        .modal   { background: rgba(6,15,40,0.97); border: 1px solid rgba(59,130,246,0.2); border-radius: 12px; width: 100%; max-width: 1200px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(59,130,246,0.15); }
+        .modal-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+        .video-sidebar { width: 240px; flex-shrink: 0; border-left: 1px solid rgba(59,130,246,0.1); display: flex; flex-direction: column; overflow: hidden; background: rgba(2,8,24,0.5); }
+        .sidebar-label { font-size: .6rem; color: rgba(59,130,246,0.5); letter-spacing: .15em; text-transform: uppercase; padding: .65rem .9rem .4rem; flex-shrink: 0; }
+        .sidebar-list { overflow-y: auto; flex: 1; }
+        .sidebar-item { display: flex; align-items: center; gap: .55rem; padding: .5rem .9rem; cursor: pointer; transition: background .1s; border-bottom: 1px solid rgba(59,130,246,0.06); }
+        .sidebar-item:hover { background: rgba(59,130,246,0.08); }
+        .sidebar-item.active { background: rgba(6,182,212,0.1); border-left: 2px solid #06B6D4; padding-left: calc(.9rem - 2px); }
+        .sidebar-item.active .sidebar-name { color: #06B6D4; }
+        .sidebar-name { font-size: .75rem; color: rgba(160,180,220,0.75); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; }
+        .sidebar-ext  { font-size: .6rem; color: rgba(59,130,246,0.4); background: rgba(59,130,246,0.07); border: 1px solid rgba(59,130,246,0.1); padding: .08rem .3rem; border-radius: 3px; flex-shrink: 0; }
         .modal-header { display: flex; align-items: center; justify-content: space-between; padding: .8rem 1.1rem; border-bottom: 1px solid rgba(59,130,246,0.1); gap: 1rem; flex-shrink: 0; }
         .modal-title { font-size: .75rem; color: rgba(160,180,220,0.6); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .modal-controls { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
@@ -419,8 +429,8 @@ export default function MediaBrowser() {
         .sub-toggle.on { border-color: #06B6D4; color: #06B6D4; box-shadow: 0 0 8px rgba(6,182,212,0.3); }
         .srt-select { background: rgba(10,20,55,0.8); border: 1px solid rgba(59,130,246,0.2); color: rgba(160,180,220,0.7); font-family: inherit; font-size: .65rem; padding: .22rem .4rem; border-radius: 4px; cursor: pointer; max-width: 160px; outline: none; transition: border-color .15s; }
         .srt-select:hover, .srt-select:focus { border-color: rgba(59,130,246,0.5); color: #F0F4FF; }
-        .video-wrap { position: relative; background: #000; flex: 1; min-height: 0; }
-        .video-wrap video { width: 100%; display: block; max-height: 80vh; }
+        .video-wrap { position: relative; background: #000; flex: 1; min-height: 0; overflow: hidden; }
+        .video-wrap video { width: 100%; height: 100%; display: block; object-fit: contain; max-height: 85vh; }
         video::cue { font-size: 100%; font-family: Arial, sans-serif; background: transparent; color: #ffffff; line-height: 1.4; text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8); }
         .txt-content { padding: 1.25rem 1.4rem; overflow-y: auto; flex: 1; font-size: .8rem; line-height: 1.75; color: rgba(160,180,220,0.8); white-space: pre-wrap; word-break: break-word; }
       `}</style>
@@ -554,19 +564,43 @@ export default function MediaBrowser() {
                 <button className="close-btn" onClick={closeModal}>×</button>
               </div>
             </div>
-            <div className="video-wrap">
-              <video ref={videoRef} controls autoPlay onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded}
-                style={{ fontSize: SUB_SIZES[subSize] }}
-                src={'/api/stream?path=' + encodeURIComponent(modal.path)}>
-                {vttUrlRef.current && (
-                  <track
-                    ref={trackRef}
-                    kind="subtitles"
-                    src={vttUrlRef.current}
-                    default
-                  />
-                )}
-              </video>
+            <div className="modal-body">
+              <div className="video-wrap">
+                <video ref={videoRef} controls autoPlay onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded}
+                  style={{ fontSize: SUB_SIZES[subSize] }}
+                  src={'/api/stream?path=' + encodeURIComponent(modal.path)}>
+                  {vttUrlRef.current && (
+                    <track
+                      ref={trackRef}
+                      kind="subtitles"
+                      src={vttUrlRef.current}
+                      default
+                    />
+                  )}
+                </video>
+              </div>
+              <div className="video-sidebar">
+                <div className="sidebar-label">In this folder</div>
+                <div className="sidebar-list">
+                  {entries.filter(e => e.ext !== '.srt').map(entry => (
+                    <div
+                      key={entry.path}
+                      className={'sidebar-item' + (entry.path === modal.path ? ' active' : '')}
+                      onClick={() => {
+                        if (entry.path === modal.path) return;
+                        if (entry.ext === '.mp4') playEntry(entry, entries);
+                        else handleFileClick(entry);
+                      }}
+                    >
+                      <span style={{fontSize:'.85rem',flexShrink:0}}>
+                        {entry.type === 'dir' ? '📁' : entry.ext === '.mp4' ? '🎬' : entry.ext === '.txt' ? '📄' : '🔗'}
+                      </span>
+                      <span className="sidebar-name">{entry.name.replace(/\.[^.]+$/, '')}</span>
+                      {entry.type === 'file' && <span className="sidebar-ext">{entry.ext}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
