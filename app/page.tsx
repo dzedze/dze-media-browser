@@ -201,9 +201,13 @@ export default function MediaBrowser() {
   const [subSize, setSubSize] = useState<'small'|'medium'|'large'>('small');
   const [autoNext, setAutoNext] = useState(true);
   const SUB_SIZES = { small: '1.8vw', medium: '2.7vw', large: '4.05vw' };
+  const kbHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const kbHintEl = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<HTMLTrackElement>(null);
   const vttUrlRef = useRef<string>('');
+  const videoWrapRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const currentPath = navStack.length > 0 ? navStack[navStack.length - 1].path : '';
 
@@ -338,6 +342,133 @@ export default function MediaBrowser() {
     setSubtitles([]);
   };
 
+  const toggleFullscreen = useCallback(() => {
+    const wrap = videoWrapRef.current;
+    const video = videoRef.current;
+    if (!wrap || !video) return;
+
+    const fsEl = document.fullscreenElement || (document as any).webkitFullscreenElement;
+    if (fsEl) {
+      (document.exitFullscreen || (document as any).webkitExitFullscreen).call(document);
+      return;
+    }
+
+    // Chrome/Firefox: requestFullscreen on the wrap div so our overlays are inside
+    if (wrap.requestFullscreen) {
+      wrap.requestFullscreen()
+        .then(() => {})
+        .catch(err => {
+          if ((video as any).webkitEnterFullscreen) (video as any).webkitEnterFullscreen();
+        });
+    } else if ((wrap as any).webkitRequestFullscreen) {
+      (wrap as any).webkitRequestFullscreen();
+    } else if ((video as any).webkitEnterFullscreen) {
+      (video as any).webkitEnterFullscreen();
+    }
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => {
+      const fs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      setIsFullscreen(fs);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+
+  // ── Keyboard shortcuts for video modal ──────────────────────────────────────
+  const showHint = useCallback((icon: string, label: string, side: 'left'|'right'|'center' = 'center') => {
+    if (kbHintEl.current) { kbHintEl.current.remove(); kbHintEl.current = null; }
+    if (kbHintTimer.current) clearTimeout(kbHintTimer.current);
+    const container = videoWrapRef.current;
+    if (!container) return;
+
+    const mk = (tag: string, css: Partial<CSSStyleDeclaration>, text?: string) => {
+      const el = document.createElement(tag);
+      Object.assign(el.style, css);
+      if (text !== undefined) el.textContent = text;
+      return el;
+    };
+
+    const hint = mk('div', { position:'absolute', zIndex:'9999', display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' });
+    if (side === 'left')       Object.assign(hint.style, { top:'0', bottom:'0', left:'0', width:'26%' });
+    else if (side === 'right') Object.assign(hint.style, { top:'0', bottom:'0', right:'0', width:'26%' });
+    else                       Object.assign(hint.style, { top:'50%', left:'50%', transform:'translate(-50%,-50%)' });
+
+    if (side === 'center') {
+      const pill = mk('div', { background:'rgba(0,0,0,0.78)', borderRadius:'10px', padding:'10px 20px', display:'flex', flexDirection:'column', alignItems:'center', gap:'5px', opacity:'0', transition:'opacity 0.2s', transform:'translateZ(0)', willChange:'opacity' });
+      pill.append(
+        mk('span', { fontSize:'1.4rem', lineHeight:'1', color:'#fff' }, icon),
+        mk('span', { fontSize:'13px', color:'rgba(255,255,255,.9)', whiteSpace:'nowrap', fontFamily:'Arial,sans-serif' }, label)
+      );
+      hint.append(pill);
+      container.appendChild(hint);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        pill.style.opacity = '1';
+        setTimeout(() => { pill.style.opacity = '0'; }, 600);
+      }));
+    } else {
+      const circle = mk('div', { width:'80px', height:'80px', borderRadius:'50%', background:'rgba(255,255,255,0.22)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'3px', opacity:'0', transition:'opacity 0.2s, transform 0.2s', transform:'scale(0.8) translateZ(0)', willChange:'opacity,transform' });
+      circle.append(
+        mk('span', { fontSize:'1rem', color:'#fff', letterSpacing:'3px' }, side === 'left' ? '\u25c0\u25c0' : '\u25b6\u25b6'),
+        mk('span', { fontSize:'11px', color:'rgba(255,255,255,.85)', fontFamily:'Arial,sans-serif' }, label)
+      );
+      hint.append(circle);
+      container.appendChild(hint);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        circle.style.opacity = '1';
+        circle.style.transform = 'scale(1) translateZ(0)';
+        setTimeout(() => { circle.style.opacity = '0'; circle.style.transform = 'scale(1.2) translateZ(0)'; }, 600);
+      }));
+    }
+
+    kbHintEl.current = hint as HTMLDivElement;
+    kbHintTimer.current = setTimeout(() => { hint.remove(); kbHintEl.current = null; }, 1000);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (modal.type !== 'video' || !videoRef.current) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight') {
+        e.preventDefault(); e.stopPropagation();
+        videoRef.current.currentTime = Math.min(videoRef.current.duration || 0, videoRef.current.currentTime + 10);
+        showHint('10', '+10 seconds', 'right');
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault(); e.stopPropagation();
+        videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+        showHint('10', '−10 seconds', 'left');
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation();
+        const vol = Math.min(1, videoRef.current.volume + 0.1);
+        videoRef.current.volume = vol;
+        showHint(vol === 0 ? '🔇' : '🔊', `Volume ${Math.round(vol * 100)}%`, 'center');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation();
+        const vol = Math.max(0, videoRef.current.volume - 0.1);
+        videoRef.current.volume = vol;
+        showHint(vol === 0 ? '🔇' : '🔉', `Volume ${Math.round(vol * 100)}%`, 'center');
+      } else if (e.key === ' ') {
+        e.preventDefault(); e.stopPropagation();
+        if (videoRef.current.paused) { videoRef.current.play(); showHint('▶', 'Play', 'center'); }
+        else { videoRef.current.pause(); showHint('⏸', 'Pause', 'center'); }
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault(); e.stopPropagation();
+        toggleFullscreen();
+      } else if (e.key === 'Escape') {
+        if (isFullscreen) { document.exitFullscreen().catch(()=>{}); return; }
+        closeModal();
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [modal.type, closeModal, showHint, toggleFullscreen]);
+
   const dirs  = entries.filter(e => e.type === 'dir');
   const files = entries.filter(e => e.type === 'file' && e.ext !== '.srt');
 
@@ -408,9 +539,11 @@ export default function MediaBrowser() {
         .picker-manual  { padding: .75rem 1rem; border-top: 1px solid rgba(59,130,246,0.1); flex-shrink: 0; }
 
         /* ── Video / txt modal ── */
-        .overlay { position: fixed; inset: 0; background: rgba(2,8,24,0.92); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
+        .overlay { position: fixed; inset: 0; background: rgba(2,8,24,0.92); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
         .modal   { background: rgba(6,15,40,0.97); border: 1px solid rgba(59,130,246,0.2); border-radius: 12px; width: 100%; max-width: 1200px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(59,130,246,0.15); }
+        .modal.fs { overflow: visible; }
         .modal-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+        .modal-body.fs { overflow: visible; }
         .video-sidebar { width: 240px; flex-shrink: 0; border-left: 1px solid rgba(59,130,246,0.1); display: flex; flex-direction: column; overflow: hidden; background: rgba(2,8,24,0.5); }
         .sidebar-label { font-size: .6rem; color: rgba(59,130,246,0.5); letter-spacing: .15em; text-transform: uppercase; padding: .65rem .9rem .4rem; flex-shrink: 0; }
         .sidebar-list { overflow-y: auto; flex: 1; }
@@ -429,8 +562,15 @@ export default function MediaBrowser() {
         .sub-toggle.on { border-color: #06B6D4; color: #06B6D4; box-shadow: 0 0 8px rgba(6,182,212,0.3); }
         .srt-select { background: rgba(10,20,55,0.8); border: 1px solid rgba(59,130,246,0.2); color: rgba(160,180,220,0.7); font-family: inherit; font-size: .65rem; padding: .22rem .4rem; border-radius: 4px; cursor: pointer; max-width: 160px; outline: none; transition: border-color .15s; }
         .srt-select:hover, .srt-select:focus { border-color: rgba(59,130,246,0.5); color: #F0F4FF; }
-        .video-wrap { position: relative; background: #000; flex: 1; min-height: 0; overflow: hidden; }
+        .video-wrap { position: relative; background: #000; flex: 1; min-height: 0; overflow: hidden; isolation: isolate; }
+        .video-wrap.fullscreen { position: fixed !important; inset: 0 !important; z-index: 9000; width: 100vw !important; height: 100vh !important; }
+        .video-wrap.fullscreen video { height: 100vh; max-height: 100vh; }
+
         .video-wrap video { width: 100%; height: 100%; display: block; object-fit: contain; max-height: 85vh; }
+
+        .fs-btn { background:none; border: 1px solid rgba(59,130,246,0.2); cursor:pointer; color:rgba(160,180,220,0.6); font-size:.75rem; padding:.22rem .5rem; border-radius:4px; font-family:inherit; display:flex; align-items:center; gap:.3rem; transition:all .15s; letter-spacing:.03em; }
+        .fs-btn:hover { border-color:rgba(59,130,246,0.5); color:#F0F4FF; }
+        .fs-btn.on { border-color:#06B6D4; color:#06B6D4; }
         video::cue { font-size: 100%; font-family: Arial, sans-serif; background: transparent; color: #ffffff; line-height: 1.4; text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8); }
         .txt-content { padding: 1.25rem 1.4rem; overflow-y: auto; flex: 1; font-size: .8rem; line-height: 1.75; color: rgba(160,180,220,0.8); white-space: pre-wrap; word-break: break-word; }
       `}</style>
@@ -522,7 +662,7 @@ export default function MediaBrowser() {
       {/* ── Video modal ── */}
       {modal.type === 'video' && (
         <div className="overlay" onClick={e => { if (e.target === e.currentTarget) closeModal(); }}>
-          <div className="modal">
+          <div className={`modal${isFullscreen ? ' fs' : ''}`}>
             <div className="modal-header">
               <span className="modal-title">{modal.name}</span>
               <div className="modal-controls">
@@ -561,21 +701,21 @@ export default function MediaBrowser() {
                   onClick={() => setAutoNext(v => !v)}>
                   ▶▶ {autoNext ? 'ON' : 'OFF'}
                 </button>
+                <button className={`fs-btn${isFullscreen ? ' on' : ''}`} onClick={toggleFullscreen} title="Fullscreen (F)">
+                  {isFullscreen ? '↙ Exit' : '↗ Full'}
+                </button>
                 <button className="close-btn" onClick={closeModal}>×</button>
               </div>
             </div>
-            <div className="modal-body">
-              <div className="video-wrap">
+            <div className={`modal-body${isFullscreen ? ' fs' : ''}`}>
+              <div className={`video-wrap${isFullscreen ? ' fullscreen' : ''}`} ref={videoWrapRef}>
                 <video ref={videoRef} controls autoPlay onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded}
                   style={{ fontSize: SUB_SIZES[subSize] }}
+                  controlsList="nofullscreen nodownload"
+                  disablePictureInPicture
                   src={'/api/stream?path=' + encodeURIComponent(modal.path)}>
                   {vttUrlRef.current && (
-                    <track
-                      ref={trackRef}
-                      kind="subtitles"
-                      src={vttUrlRef.current}
-                      default
-                    />
+                    <track ref={trackRef} kind="subtitles" src={vttUrlRef.current} default />
                   )}
                 </video>
               </div>
@@ -606,10 +746,11 @@ export default function MediaBrowser() {
         </div>
       )}
 
+
       {/* ── TXT modal ── */}
       {modal.type === 'txt' && (
         <div className="overlay" onClick={e => { if (e.target === e.currentTarget) closeModal(); }}>
-          <div className="modal">
+          <div className={`modal${isFullscreen ? ' fs' : ''}`}>
             <div className="modal-header">
               <span className="modal-title">{modal.name}</span>
               <div className="modal-controls">
@@ -620,6 +761,7 @@ export default function MediaBrowser() {
           </div>
         </div>
       )}
+
     </>
   );
 }

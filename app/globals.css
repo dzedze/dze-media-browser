@@ -32,3 +32,17 @@ html, body {
 ::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.5); }
 
 ::selection { background: rgba(59, 130, 246, 0.3); color: #fff; }
+
+/* Fullscreen: video-wrap as root */
+.video-wrap:fullscreen,
+.video-wrap:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  position: relative;
+}
+.video-wrap:fullscreen video,
+.video-wrap:-webkit-full-screen video {
+  max-height: 100vh;
+  height: 100vh;
+}
